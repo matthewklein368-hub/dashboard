@@ -1144,41 +1144,16 @@ html, body {
 
   function rerender() { try { renderAll(); } catch {} }
 
-  // Merge water state: keep higher drink count per date so no drinks are lost.
-  // Profile/settings come from whichever has the more recent update (cloud on load).
-  function mergeWaterState(localRaw, cloudState) {
-    var local = null;
-    try { local = localRaw ? JSON.parse(localRaw) : null; } catch {}
-    if (!local && !cloudState) return null;
-    if (!local) return cloudState;
-    if (!cloudState) return local;
-    // Merge logs: take max count per date key
-    var localLogs = local.logs || {};
-    var cloudLogs = cloudState.logs || {};
-    var merged = Object.assign({}, cloudLogs);
-    for (var date in localLogs) {
-      merged[date] = Math.max(localLogs[date] || 0, cloudLogs[date] || 0);
-    }
-    // Use cloud for profile/settings (latest authoritative); overlay merged logs
-    return Object.assign({}, cloudState, { logs: merged });
-  }
-
+  // Last-write-wins: cloud state is applied directly to local.
+  // Whichever device last saved a count, that's what both devices show.
   function applyRemote(remote) {
     if (!remote || typeof remote !== 'object' || !(WATER_KEY in remote)) return;
-    var localRaw = localStorage.getItem(WATER_KEY);
-    var mergedState = mergeWaterState(localRaw, remote[WATER_KEY]);
-    if (!mergedState) return;
-    var incoming = JSON.stringify(mergedState);
+    const incoming = JSON.stringify(remote[WATER_KEY]);
+    const localRaw = localStorage.getItem(WATER_KEY);
+    if (incoming === localRaw) return;
     suppressSync = true;
-    var changed = false;
-    try {
-      if (localRaw !== incoming) { try { _origSet(WATER_KEY, incoming); changed = true; } catch {} }
-    } finally { suppressSync = false; }
-    if (changed) {
-      rerender();
-      // Push the merged result back to cloud so both devices converge
-      schedulePush();
-    }
+    try { _origSet(WATER_KEY, incoming); } catch {} finally { suppressSync = false; }
+    rerender();
   }
 
   function isEditing() {
