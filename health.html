@@ -1090,10 +1090,8 @@ main {
         const incoming = JSON.stringify(remote[k]);
         if (localStorage.getItem(k) !== incoming) { try { _origSet(k, incoming); changed = true; } catch {} }
       }
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i);
-        if (isStackKey(k) && !(k in remote)) { try { _origRemove(k); changed = true; } catch {} }
-      }
+      // Never delete local-only keys — cloud may be stale for that date.
+      // Only merge in what cloud has; local additions are preserved.
     } finally { suppressSync = false; }
     if (changed) rerender();
   }

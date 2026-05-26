@@ -1363,16 +1363,12 @@ body::after {
     suppressSync = true;
     let changed = false;
     try {
-      // Write all incoming keys
+      // Merge cloud keys into local — cloud wins for keys it has.
+      // Never delete local-only keys: cloud may just be stale for that date.
       for (const k of Object.keys(remote)) {
         if (!isGoalsKey(k)) continue;
         const incoming = JSON.stringify(remote[k]);
         if (localStorage.getItem(k) !== incoming) { try { _origSet(k, incoming); changed = true; } catch {} }
-      }
-      // Remove keys that are gone from the cloud snapshot
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i);
-        if (isGoalsKey(k) && !(k in remote)) { try { _origRemove(k); changed = true; } catch {} }
       }
     } finally { suppressSync = false; }
     if (changed) try { rerender(); } catch {}
