@@ -1399,21 +1399,31 @@ body::after {
     pushTimer = setTimeout(pushNow, 250);
   }
 
-  window.addEventListener('beforeunload', () => {
-    if (!supa) return;
+  function pushFlush() {
     const state = collectState();
     const json  = JSON.stringify(state);
     if (json === lastJson) return;
+    const payload = JSON.stringify({ key: APP_KEY, data: state, updated_at: new Date().toISOString() });
+    if (typeof navigator.sendBeacon === 'function') {
+      try {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(SUPA_URL + '/rest/v1/app_state?on_conflict=key&apikey=' + SUPA_KEY, blob);
+      } catch (e) {}
+    }
     try {
       fetch(SUPA_URL + '/rest/v1/app_state?on_conflict=key', {
         method: 'POST',
         headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
                    'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify({ key: APP_KEY, data: state, updated_at: new Date().toISOString() }),
+        body: payload,
         keepalive: true,
       }).catch(() => {});
-      lastJson = json;
-    } catch {}
+    } catch (e) {}
+    lastJson = json;
+  }
+  window.addEventListener('beforeunload', pushFlush);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') pushFlush();
   });
 
   (async function init() {

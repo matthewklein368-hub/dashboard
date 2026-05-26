@@ -1190,21 +1190,37 @@ html, body {
     pushTimer = setTimeout(pushNow, 250);
   }
 
-  window.addEventListener('beforeunload', () => {
-    if (!supa) return;
+  // pushFlush: called on visibilitychange(hidden) and beforeunload.
+  // Fires sendBeacon (survives iOS app switches, no async) AND fetch keepalive
+  // (reliable auth) simultaneously so at least one gets through.
+  function pushFlush() {
     const state = collectState();
     const json  = JSON.stringify(state);
     if (json === lastJson) return;
+    const payload = JSON.stringify({ key: APP_KEY, data: state, updated_at: new Date().toISOString() });
+    // sendBeacon: synchronous, survives iOS page suspension; auth via query param
+    if (typeof navigator.sendBeacon === 'function') {
+      try {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(SUPA_URL + '/rest/v1/app_state?on_conflict=key&apikey=' + SUPA_KEY, blob);
+      } catch (e) {}
+    }
+    // fetch keepalive: proper auth headers, completes even as page unloads
     try {
       fetch(SUPA_URL + '/rest/v1/app_state?on_conflict=key', {
         method: 'POST',
         headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
                    'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify({ key: APP_KEY, data: state, updated_at: new Date().toISOString() }),
+        body: payload,
         keepalive: true,
       }).catch(() => {});
-      lastJson = json;
-    } catch {}
+    } catch (e) {}
+    lastJson = json;
+  }
+  window.addEventListener('beforeunload', pushFlush);
+  // visibilitychange fires BEFORE iOS suspends the page — most reliable hook on mobile
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') pushFlush();
   });
 
   (async function init() {
