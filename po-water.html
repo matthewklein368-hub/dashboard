@@ -1144,15 +1144,41 @@ html, body {
 
   function rerender() { try { renderAll(); } catch {} }
 
+  // Merge water state: keep higher drink count per date so no drinks are lost.
+  // Profile/settings come from whichever has the more recent update (cloud on load).
+  function mergeWaterState(localRaw, cloudState) {
+    var local = null;
+    try { local = localRaw ? JSON.parse(localRaw) : null; } catch {}
+    if (!local && !cloudState) return null;
+    if (!local) return cloudState;
+    if (!cloudState) return local;
+    // Merge logs: take max count per date key
+    var localLogs = local.logs || {};
+    var cloudLogs = cloudState.logs || {};
+    var merged = Object.assign({}, cloudLogs);
+    for (var date in localLogs) {
+      merged[date] = Math.max(localLogs[date] || 0, cloudLogs[date] || 0);
+    }
+    // Use cloud for profile/settings (latest authoritative); overlay merged logs
+    return Object.assign({}, cloudState, { logs: merged });
+  }
+
   function applyRemote(remote) {
     if (!remote || typeof remote !== 'object' || !(WATER_KEY in remote)) return;
+    var localRaw = localStorage.getItem(WATER_KEY);
+    var mergedState = mergeWaterState(localRaw, remote[WATER_KEY]);
+    if (!mergedState) return;
+    var incoming = JSON.stringify(mergedState);
     suppressSync = true;
-    let changed = false;
+    var changed = false;
     try {
-      const incoming = JSON.stringify(remote[WATER_KEY]);
-      if (localStorage.getItem(WATER_KEY) !== incoming) { try { _origSet(WATER_KEY, incoming); changed = true; } catch {} }
+      if (localRaw !== incoming) { try { _origSet(WATER_KEY, incoming); changed = true; } catch {} }
     } finally { suppressSync = false; }
-    if (changed) rerender();
+    if (changed) {
+      rerender();
+      // Push the merged result back to cloud so both devices converge
+      schedulePush();
+    }
   }
 
   function isEditing() {
@@ -1178,8 +1204,9 @@ html, body {
         { key: APP_KEY, data: state, updated_at: new Date().toISOString() },
         { onConflict: 'key' }
       );
-      if (!error) lastJson = json;
-    } catch {}
+      if (error) { console.warn('[water-sync] push error:', error.message); }
+      else { lastJson = json; console.log('[water-sync] pushed ok, logs:', (state[WATER_KEY] || {}).logs); }
+    } catch (e) { console.warn('[water-sync] push exception:', e); }
   }
 
   function schedulePush() {
@@ -1206,10 +1233,12 @@ html, body {
   });
 
   (async function init() {
-    if (!window.supabase) return;
+    if (!window.supabase) { console.warn('[water-sync] supabase-js not loaded'); return; }
     supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
     try {
       const { data, error } = await supa.from('app_state').select('data').eq('key', APP_KEY).maybeSingle();
+      if (error) { console.warn('[water-sync] fetch error:', error.message); }
+      console.log('[water-sync] cloud logs on load:', data && data.data && data.data[WATER_KEY] ? data.data[WATER_KEY].logs : '(none)');
       if (!error && data && data.data && Object.keys(data.data).length > 0) {
         lastJson = JSON.stringify(data.data);
         maybeApply(data.data);
